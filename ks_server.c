@@ -16,20 +16,73 @@
 #include <dirent.h>
 #include <pthread.h>
 
+typedef struct
+{
+    char* location;
+    char* file_name;
+    char* keyword;
+} Query;
 
 void* analyzeFile(void* arg)
 {
-    char* thread_id = (char*)arg;
-    printf("From thread %s\n",thread_id);
+    Query* cur_qry = (Query*)arg;
+    char* full_path = strdup(cur_qry->location);
+    strcat(full_path,"/");
+    strcat(full_path,cur_qry->file_name);
+
+    FILE* file = fopen(full_path,"r");
+    if (file == NULL)
+    {
+        perror("fopen");
+        exit(1);
+    }
+
+    const key_t client_key = ftok(cur_qry->location, 67);
+    int client_msg_id = msgget(client_key, 0);
+    if (client_msg_id == -1)
+    {
+        perror("msgget analyze");
+    }
+
+    char buf[MAXLINESIZE];
+    while (fgets(buf,sizeof(buf), file) != NULL)
+    {
+        char* full_line = strdup(buf);
+        // split up by space
+        char* save_ptr;
+        char* token = strtok_r(buf, " ", &save_ptr);
+        while (token != NULL)
+        {
+            if (token[strlen(token)-1]=='\n')
+            {
+                token[strlen(token)-1]='\0';
+            }
+            if (strcmp(token, cur_qry->keyword) == 0)
+            {
+                // send message to client
+                char* send_str = strdup(cur_qry->keyword);
+                strcat(send_str,":");
+                strcat(send_str,full_line);
+                msgsnd(client_msg_id,send_str,strlen(send_str)+1,0);
+                break;
+            }
+            token = strtok_r(NULL, " ", &save_ptr);
+        }
+    }
+
+    char* depart = "quit";
+    msgsnd(client_msg_id,depart,strlen(depart)+1,0);
+
+    free(cur_qry);
+
+    fclose(file);
+
     return NULL;
 }
 
 
-void clientMessage(char* keyword, char* full_dir)
+void clientMessage(char* keyword, const char* full_dir)
 {
-    printf("Keyword: %s\n", keyword);
-    printf("Full path: %s\n", full_dir);
-
     struct dirent *entry;
     DIR *dir = opendir(full_dir);
 
@@ -39,7 +92,6 @@ void clientMessage(char* keyword, char* full_dir)
         return;
     }
 
-    printf("Files in directory:\n");
     int file_count = 0; // number of threads
     char** files = NULL;
     while ((entry = readdir(dir)) != NULL)
@@ -76,15 +128,15 @@ void clientMessage(char* keyword, char* full_dir)
     pthread_t threads[file_count];
     for (int i=0;i<file_count;i++)
     {
-        char* full_path = strdup(full_dir);
-        strcat(full_path,"/");
-        strcat(full_path,files[i]);
-        if (pthread_create(&threads[i], NULL, analyzeFile, (void*)full_path))
+        Query* new_qry = malloc(sizeof(Query));
+        new_qry->location = strdup(full_dir);
+        new_qry->file_name = strdup(files[i]);
+        new_qry->keyword = keyword;
+        if (pthread_create(&threads[i], NULL, analyzeFile, (void*)new_qry))
         {
             perror("pthread_create");
             exit(1);
         }
-        printf("%s\n", files[i]);
     }
 
     for (int i=0;i<file_count;i++)
@@ -107,8 +159,6 @@ void clientMessage(char* keyword, char* full_dir)
 
 int main()
 {
-    printf("Starting server...\n\n");
-
     // unioue key
     key_t key = ftok("ks_server.c", 67);
 
@@ -117,7 +167,7 @@ int main()
 
     if (msgid == -1)
     {
-        perror("msgget");
+        perror("msgget main");
         return(1);
     }
 
@@ -132,8 +182,6 @@ int main()
         msgrcv(msgid, buf, sizeof(buf), 0, 0);
         if (strlen(buf) > 0)
         {
-            printf("Received message: %s\n", buf);
-
             // check if exit
             if (strcmp(buf, "exit") == 0)
             {

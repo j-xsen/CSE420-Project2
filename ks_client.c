@@ -7,6 +7,7 @@
 #define MAXOUTSIZE 2048
 
 #include <stdio.h>
+#include <string.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/types.h>
@@ -21,7 +22,6 @@ int main(int argc, char *argv[]) {
 
     // server key
     key_t key = ftok("ks_server.c", 67);
-    key_t client_key = ftok("ks_client.c", 67);
 
     // test send message
     // get msg id
@@ -33,7 +33,10 @@ int main(int argc, char *argv[]) {
         return(1);
     }
 
-    char buf[1024] = "Hello World!";
+    char buf[1024];
+    strcpy(buf, argv[1]);
+    strcat(buf, ":");
+    strcat(buf, argv[2]);
     msgsnd(msgid, &buf,sizeof(buf), 0);
 
     return 0;

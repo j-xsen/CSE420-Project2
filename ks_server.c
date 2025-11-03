@@ -37,12 +37,13 @@ void* analyzeFile(void* arg)
     char* full_path = calloc(1, size_of_path);
     snprintf(full_path, size_of_path, "%s/%s", cur_qry->location, cur_qry->file_name);
 
-    printf("Searching %s for %s\n", full_path, cur_qry->keyword);
+    // printf("Searching %s for %s\n", full_path, cur_qry->keyword);
 
     FILE* file = fopen(full_path,"r");
     if (file == NULL)
     {
         perror("fopen");
+        fclose(file);
         exit(1);
     }
 
@@ -50,11 +51,13 @@ void* analyzeFile(void* arg)
     int client_msg_id = msgget(client_key, 0);
     if (client_msg_id == -1)
     {
-        perror("msgget analyze");
+        printf("Client key %d\n", client_key);
+        perror("msgget analyze - client_msg_id == -1");
+        free(full_path);
+        return NULL;
     }
 
     char buf[MAXLINESIZE];
-    int msg_sent = 0;
     while (fgets(buf,sizeof(buf), file) != NULL)
     {
         char* buf_bu = strdup(buf);
@@ -74,21 +77,14 @@ void* analyzeFile(void* arg)
                 memset(msg, 0, sizeof(struct msgbuf));
                 msg->mtype = 1;
                 snprintf(msg->mtext, sizeof(msg->mtext), "%s:%s", cur_qry->keyword, buf_bu);
-                printf("Sending %s\n",msg->mtext);
                 msgsnd(client_msg_id,msg,strlen(msg->mtext)+1,0);
                 free(msg);
-                msg_sent=1;
                 break;
             }
             token = strtok_r(NULL, " ", &save_ptr);
         }
         free(buf_bu);
     }
-    struct msgbuf* msg_buf = malloc(sizeof(struct msgbuf));
-    msg_buf->mtype=1;
-    strcpy(msg_buf->mtext,"exit");
-    msgsnd(client_msg_id,msg_buf,strlen(msg_buf->mtext)+1,0);
-    free(msg_buf);
 
     free(cur_qry->location);
     free(cur_qry->file_name);
@@ -149,7 +145,6 @@ void clientMessage(char* keyword, const char* full_dir, char* process_id)
     }
 
     pthread_t threads[file_count];
-    int thread_created[file_count];
     for (int i=0;i<file_count;i++)
     {
         Query* new_qry = malloc(sizeof(Query));
@@ -162,14 +157,27 @@ void clientMessage(char* keyword, const char* full_dir, char* process_id)
         new_qry->file_name = strdup(files[i]);
         new_qry->keyword = strdup(keyword);
         new_qry->process_id = strdup(process_id);
-        if (pthread_create(&threads[i], NULL, analyzeFile, (void*)new_qry) == 0)
+        if (pthread_create(&threads[i], NULL, analyzeFile, (void*)new_qry) != 0)
         {
-            thread_created[i] = 1;
-        } else {
             perror("pthread_create");
         }
+    }
+
+    for (int i = 0; i < file_count; i++)
+    {
         pthread_join(threads[i], NULL);
     }
+
+    const key_t client_key = ftok(full_dir, atoi(process_id));
+    int client_msg_id = msgget(client_key, 0);
+    // printf("For client %d \\ %i\n", client_key, client_msg_id);
+
+    struct msgbuf* msg_buf = malloc(sizeof(struct msgbuf));
+    msg_buf->mtype=1;
+    strcpy(msg_buf->mtext,"exit");
+    // printf("Sending exit\n");
+    msgsnd(client_msg_id,msg_buf,strlen(msg_buf->mtext)+1,0);
+    free(msg_buf);
 
     for (int i = 0; i < file_count; i++)
     {
@@ -184,6 +192,8 @@ int main()
 {
     // unioue key
     key_t key = ftok("ks_server.c", 67);
+
+    // printf("Server key: %d\n", key);
 
     // create or read message queue
     int msgid = msgget(key, 0666 | IPC_CREAT);
@@ -205,6 +215,7 @@ int main()
         msgrcv(msgid, buf, sizeof(buf->mtext), 0, 0);
         if (strlen(buf->mtext) > 0)
         {
+            // printf("Received message: %s\n", buf->mtext);
             char *saveptr;
             char *keyword = strtok_r(buf->mtext, ":", &saveptr);
             char *full_path = strtok_r(NULL, ":", &saveptr);
@@ -212,6 +223,7 @@ int main()
             // check if exit
             if (strcmp(keyword, "exit") == 0)
             {
+                // printf("Exiting...\n");
                 // clean up
                 if (msgctl(msgid, IPC_RMID, 0) == -1)
                 {

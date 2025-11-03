@@ -53,20 +53,19 @@ void* monitorResponse(void* arg)
         if (received==-1)
         {
             perror("msgrcv");
-            free(buf);
-            return NULL;
+            break;
         }
         if (strlen(buf->mtext)>0)
         {
             if (strcmp(buf->mtext,"exit")==0)
             {
-                closeConnection(msg_id);
-                free(buf);
-                return NULL;
+                break;
             }
             printf("%s\n", buf->mtext);
         }
     }
+    free(buf);
+    return NULL;
 }
 
 int main(int argc, char *argv[]) {
@@ -84,6 +83,9 @@ int main(int argc, char *argv[]) {
     const key_t server_key = ftok("ks_server.c", 67);
     const key_t client_key = ftok(argv[2], atoi(pid_str));
 
+    // printf("Server_key %d\n", server_key);
+    // printf("Client_key %d\n",client_key);
+
     // msq_ids
     const int server_msg_id = msgget(server_key, 0);
     if (server_msg_id == -1)
@@ -99,6 +101,9 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // printf("Server msg id: %d\n", server_msg_id);
+    // printf("Client msg id: %d\n", client_msg_id);
+
     size_t buf_size = strlen(argv[1]) + strlen(argv[2]) + strlen(pid_str) + 3;
     char* buf = malloc(buf_size);
     snprintf(buf, buf_size, "%s:%s:%s", argv[1], argv[2], pid_str);
@@ -113,7 +118,7 @@ int main(int argc, char *argv[]) {
     // send message
     sendSearch(buf,server_msg_id);
 
-    pthread_join(response_thread, NULL);
+    if (strcmp(argv[1],"exit") != 0) pthread_join(response_thread, NULL);
 
     free(buf);
 

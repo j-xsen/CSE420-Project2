@@ -7,10 +7,12 @@
 #define MAXOUTSIZE 2048
 
 #include <pthread.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
 #include <sys/types.h>
@@ -83,9 +85,6 @@ int main(int argc, char *argv[]) {
     const key_t server_key = ftok("ks_server.c", 67);
     const key_t client_key = ftok(argv[2], atoi(pid_str));
 
-    // printf("Server_key %d\n", server_key);
-    // printf("Client_key %d\n",client_key);
-
     // msq_ids
     const int server_msg_id = msgget(server_key, 0);
     if (server_msg_id == -1)
@@ -101,29 +100,50 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // printf("Server msg id: %d\n", server_msg_id);
-    // printf("Client msg id: %d\n", client_msg_id);
-
-    size_t buf_size = strlen(argv[1]) + strlen(argv[2]) + strlen(pid_str) + 3;
-    char* buf = malloc(buf_size);
-    snprintf(buf, buf_size, "%s:%s:%s", argv[1], argv[2], pid_str);
-    pthread_t response_thread;
-    if (pthread_create(&response_thread, NULL, monitorResponse, (void*)&client_msg_id) != 0)
+    if (strcmp(argv[1],"exit")!=0)
     {
-        perror("pthread_create");
+        sem_t *sem = mmap(NULL, sizeof(sem_t), PROT_READ | PROT_WRITE,
+        MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        int *counter = mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE,
+            MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+        sem_init(sem, 1, 1);
+
+        size_t buf_size = strlen(argv[1]) + strlen(argv[2]) + strlen(pid_str) + 3;
+        char* buf = malloc(buf_size);
+        snprintf(buf, buf_size, "%s:%s:%s", argv[1], argv[2], pid_str);
+        pthread_t response_thread;
+        if (pthread_create(&response_thread, NULL, monitorResponse, (void*)&client_msg_id) != 0)
+        {
+            perror("pthread_create");
+            free(buf);
+            sem_destroy(sem);
+            return 1;
+        }
+
+        // send message
+        sendSearch(buf,server_msg_id);
+
+        pthread_join(response_thread, NULL);
+
+        while (1)
+        {
+            sem_wait(sem);
+            if (*counter == 0) break;
+            sleep(1);
+            sem_post(sem);
+        }
         free(buf);
-        return 1;
+        sem_destroy(sem);
+    } else
+    {
+        // send exit command
+        char* buf = "exit::";
+        sendSearch(buf, server_msg_id);
     }
-
-    // send message
-    sendSearch(buf,server_msg_id);
-
-    if (strcmp(argv[1],"exit") != 0) pthread_join(response_thread, NULL);
-
-    free(buf);
 
     // close message queue
     closeConnection(client_msg_id);
+    //printf("[c] closed %i\n",client_msg_id);
 
     return 0;
 }

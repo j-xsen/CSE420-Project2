@@ -63,7 +63,7 @@ void* monitorResponse(void* arg)
             {
                 break;
             }
-            printf("%s\n", buf->mtext);
+            printf("%s", buf->mtext);
         }
     }
     free(buf);
@@ -76,6 +76,7 @@ int main(int argc, char *argv[]) {
         printf("Usage: ks_client <keyword> <dirpath>\n");
         printf("Arguments expected: 2\n");
         printf("Arguments received: %i\n", argc);
+        return 1;
     }
 
     char pid_str[16];

@@ -64,14 +64,17 @@ void* analyzeFile(void* arg)
     while (fgets(buf,sizeof(buf), file) != NULL)
     {
         // create buffer
-        char* buf_bu = strdup(buf);
-        if (!buf_bu) continue;
+        char* buf_bu = strdup(buf); // sending
+        char* buf_tok = strdup(buf); // tokenizing
+        if (!buf_bu || !buf_tok)
+        {
+            printf("Continuing on %s\n",buf);
+            continue;
+        }
         // strip newline
-        size_t len = strlen(buf_bu);
-        if (len > 0 && buf_bu[len-1] == '\n') buf_bu[len-1] = '\0';
         // split up by space
         char* save_ptr;
-        char* token = strtok_r(buf, " ", &save_ptr);
+        char* token = strtok_r(buf_tok, " ", &save_ptr);
         while (token != NULL)
         {
             if (!isalnum(token[strlen(token)-1])) token[strlen(token)-1] = '\0';
@@ -89,6 +92,7 @@ void* analyzeFile(void* arg)
             token = strtok_r(NULL, " ", &save_ptr);
         }
         free(buf_bu);
+        free(buf_tok);
     }
 
     free(cur_qry->location);

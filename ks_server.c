@@ -33,6 +33,20 @@ struct msgbuf
     char mtext[MAXLINESIZE+MAXKEYWORD+2];
 };
 
+void sanitize(char* sanitizee)
+{
+    // strip leading
+    while (*sanitizee && !isalnum((unsigned char)sanitizee[0])) {
+        sanitizee++;
+    }
+
+    // strip trailing
+    size_t len = strlen(sanitizee);
+    while (len > 0 && !isalnum((unsigned char)sanitizee[len - 1])) {
+        sanitizee[--len] = '\0';
+    }
+}
+
 void* analyzeFile(void* arg)
 {
     Query* cur_qry = (Query*)arg;
@@ -74,11 +88,15 @@ void* analyzeFile(void* arg)
         // strip newline
         // split up by space
         char* save_ptr;
-        char* token = strtok_r(buf_tok, " ", &save_ptr);
+        char* token = strtok_r(buf_tok, " \t", &save_ptr);
         while (token != NULL)
         {
-            if (!isalnum(token[strlen(token)-1])) token[strlen(token)-1] = '\0';
-            if (strcmp(token, cur_qry->keyword) == 0)
+            // sanitize
+            sanitize(token);
+            char* keyword_copy = strdup(cur_qry->keyword);
+            sanitize(keyword_copy);
+
+            if (strcmp(token, keyword_copy) == 0)
             {
                 // send message to client
                 struct msgbuf* msg = malloc(sizeof(struct msgbuf));
@@ -89,12 +107,12 @@ void* analyzeFile(void* arg)
                 free(msg);
                 break;
             }
+            free(keyword_copy);
             token = strtok_r(NULL, " ", &save_ptr);
         }
         free(buf_bu);
         free(buf_tok);
     }
-
     free(cur_qry->location);
     free(cur_qry->file_name);
     free(cur_qry->process_id);
